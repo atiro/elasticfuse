@@ -1,4 +1,3 @@
-import sys
 import argparse
 import errno
 import json
@@ -9,6 +8,7 @@ from cachetools import LRUCache
 
 import requests
 from fuse import FUSE, Operations, LoggingMixIn, fuse_get_context
+
 
 class ElasticFS(LoggingMixIn, Operations):
 
@@ -38,22 +38,26 @@ class ElasticFS(LoggingMixIn, Operations):
     def getattr(self, path, fh=None):
         uid, gid, pid = fuse_get_context()
 
-        path_parts = path.split('/')
+        pp = path.split('/')
 
         if path == '/':
             st = dict(st_mode=(stat.S_IFDIR | 0o755), st_nlink=2)
-        elif len(path_parts) < 5:
+        elif len(pp) < 5:
             st = dict(st_mode=(stat.S_IFDIR | 0o755), st_nlink=2)
-        elif len(path_parts) == 5 and path_parts[3] == "documents":
+        elif len(pp) == 5 and pp[3] == "documents":
             st = dict(st_mode=(stat.S_IFDIR | 0o755), st_nlink=2)
         else:
             st = dict(st_mode=(stat.S_IFREG | 0o444), st_size=0)
-            if path_parts[3] == "properties":
-                es_json = self.prop_cache[self.es_base_url + '/%s/%s/_mapping' % (path_parts[1], path_parts[2])]
-                mapping = json.dumps(es_json[path_parts[1]]['mappings'][path_parts[2]]['properties'][path_parts[4]]) + "\n"
+            if pp[3] == "properties":
+                es_json = self.prop_cache[self.es_base_url +
+                                          '/%s/%s/_mapping' % (pp[1], pp[2])]
+                mapping = json.dumps(es_json
+                                     [pp[1]]['mappings'][pp[2]]
+                                     ['properties'][pp[4]]) + "\n"
                 st['st_size'] = len(mapping)
-            elif path_parts[3] == "documents":
-                st['st_size'] = len(self.doc_cache[self.es_base_url + '/%s/%s/%s' % (path_parts[1], path_parts[2], path_parts[5])])
+            elif pp[3] == "documents":
+                st['st_size'] = len(self.doc_cache[self.es_base_url +
+                                    '/%s/%s/%s' % (pp[1], pp[2], pp[5])])
 
         st['st_ctime'] = st['st_mtime'] = st['st_atime'] = time()
 
@@ -61,7 +65,7 @@ class ElasticFS(LoggingMixIn, Operations):
 
     def readdir(self, path, fh):
 
-        path_parts = []
+        pp = []
 
         # Either indexes, types, docs (and potentially nested docs?)
         # if depth = 0 - indexes, 1 - types, 2 - docs, 3+ nested.
@@ -70,7 +74,7 @@ class ElasticFS(LoggingMixIn, Operations):
             depth = 0
         else:
             depth = len(path.split('/')) - 1
-            path_parts = path.split('/')
+            pp = path.split('/')
 
         items = ['.', '..']
 
@@ -80,33 +84,27 @@ class ElasticFS(LoggingMixIn, Operations):
                 for index_name in req.json().keys():
                     items.append(index_name)
         elif depth == 1:
-            req = requests.get(self.es_base_url + '/%s/_mapping' % path_parts[1])
+            req = requests.get(self.es_base_url + '/%s/_mapping' % pp[1])
             json = req.json()
-            for doc_type in json[path_parts[1]]['mappings']:
+            for doc_type in json[pp[1]]['mappings']:
                 items.append(doc_type)
         elif depth == 2:
             items.append('properties')
             items.append('documents')
         elif depth == 3:
-            if path_parts[3] == "properties":
+            if pp[3] == "properties":
                 es_json = self.prop_cache[self.es_base_url + '/%s/%s/_mapping' %
-                                          (path_parts[1], path_parts[2])]
-                for doc_type in es_json[path_parts[1]]['mappings'][path_parts[2]]['properties']:
+                                          (pp[1], pp[2])]
+                for doc_type in es_json[pp[1]]['mappings'][pp[2]]['properties']:
                     items.append(doc_type)
-            elif path_parts[3] == "documents":
-                items.append("0")
-                items.append("10")
-                items.append("20")
-                items.append("30")
-                items.append("40")
-                items.append("50")
-                items.append("60")
-                items.append("70")
-                items.append("80")
-                items.append("90")
+            elif pp[3] == "documents":
+                items.extend(["0", "10", "20", "30", "40", "50",
+                    "60", "70", "80", "90"])
         elif depth == 4:
-                offset = path_parts[4]
-                req = requests.get(self.es_base_url + '/%s/%s/_search?from=%s&size=10' % (path_parts[1], path_parts[2], offset))
+                offset = pp[4]
+                req = requests.get(self.es_base_url +
+                                   '/%s/%s/_search?from=%s&size=10'
+                                   % (pp[1], pp[2], offset))
                 es_json = req.json()
                 for doc in es_json['hits']['hits']:
                     items.append(doc['_id'])
@@ -152,16 +150,16 @@ class ElasticFS(LoggingMixIn, Operations):
         return -errno.ENOSYS
 
     def read(self, path, length, offset, fh):
-        path_parts = path.split('/'[offset:length])
+        pp = path.split('/'[offset:length])
         mapping = ""
 
-        if path_parts[3] == "properties":
+        if pp[3] == "properties":
 
-            es_json = self.prop_cache[self.es_base_url + '/%s/%s/_mapping' % (path_parts[1], path_parts[2])]
-            mapping = json.dumps(es_json[path_parts[1]]['mappings'][path_parts[2]]['properties'][path_parts[4]]) + "\n"
-        elif path_parts[3] == "documents":
-            mapping = self.doc_cache[self.es_base_url + '/%s/%s/%s' % 
-                        (path_parts[1], path_parts[2], path_parts[5])]
+            es_json = self.prop_cache[self.es_base_url + '/%s/%s/_mapping' % (pp[1], pp[2])]
+            mapping = json.dumps(es_json[pp[1]]['mappings'][pp[2]]['properties'][pp[4]]) + "\n"
+        elif pp[3] == "documents":
+            mapping = self.doc_cache[self.es_base_url + '/%s/%s/%s' %
+                        (pp[1], pp[2], pp[5])]
 
         return mapping.encode('ascii', errors='ignore')[offset:offset+length]
 
@@ -172,8 +170,8 @@ def main():
     parser.add_argument("directory", help="Local directory")
     args = parser.parse_args()
 
-    fuse = FUSE(ElasticFS(args.elasticsearch), args.directory, foreground=True, ro=True)
+    fuse = FUSE(ElasticFS(args.elasticsearch),
+                args.directory, foreground=True, ro=True)
 
 if __name__ == '__main__':
     main()
-
